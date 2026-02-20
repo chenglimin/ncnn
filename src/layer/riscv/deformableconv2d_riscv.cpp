@@ -442,7 +442,7 @@ int DeformableConv2D_riscv::forward(const std::vector<Mat>& bottom_blobs, std::v
             const bool offset_not_pack = offset.elempack == 1;
             const bool mask_not_pack = has_mask ? bottom_blobs[2].elempack == 1 : true;
             const float* weight_ptr = weight_data_tm;
-    
+
             // naive deformable conv
             #pragma omp parallel for num_threads(opt.num_threads)
             for (int h_col = 0; h_col < outh; h_col++)
@@ -490,7 +490,7 @@ int DeformableConv2D_riscv::forward(const std::vector<Mat>& bottom_blobs, std::v
                                 }
                                 const float h_im = h_in + i * dilation_h + offset_h;
                                 const float w_im = w_in + j * dilation_w + offset_w;
-    
+
                                 // Bilinear
                                 const bool cond = h_im > -1 && w_im > -1 && h_im < h && w_im < w;
                                 int h_low = 0;
@@ -511,23 +511,23 @@ int DeformableConv2D_riscv::forward(const std::vector<Mat>& bottom_blobs, std::v
                                     w_low = (int)floorf(w_im);
                                     h_high = h_low + 1;
                                     w_high = w_low + 1;
-    
+
                                     float lh = h_im - h_low;
                                     float lw = w_im - w_low;
                                     float hh = 1 - lh;
                                     float hw = 1 - lw;
-    
+
                                     v1_cond = (h_low >= 0 && w_low >= 0);
                                     v2_cond = (h_low >= 0 && w_high <= w - 1);
                                     v3_cond = (h_high <= h - 1 && w_low >= 0);
                                     v4_cond = (h_high <= h - 1 && w_high <= w - 1);
-    
+
                                     w1 = hh * hw;
                                     w2 = hh * lw;
                                     w3 = lh * hw;
                                     w4 = lh * lw;
                                 }
-    
+
                                 for (int ic = 0; ic < channels; ic++)
                                 {
                                     float val = 0.f;
