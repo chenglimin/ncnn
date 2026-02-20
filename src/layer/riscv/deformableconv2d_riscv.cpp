@@ -439,26 +439,114 @@ int DeformableConv2D_riscv::forward(const std::vector<Mat>& bottom_blobs, std::v
 #endif // __riscv_vector
         if (elempack == 1 && out_elempack == 1)
         {
-            std::vector<Mat> bottom_blobs_unpacked = bottom_blobs;
-            Mat offset_unpacked;
-            if (offset.elempack != 1)
+            const bool offset_not_pack = offset.elempack == 1;
+            const bool mask_not_pack = has_mask ? bottom_blobs[2].elempack == 1 : true;
+            const float* weight_ptr = weight_data_tm;
+    
+            // naive deformable conv
+            #pragma omp parallel for num_threads(opt.num_threads)
+            for (int h_col = 0; h_col < outh; h_col++)
             {
-                convert_packing(offset, offset_unpacked, 1, opt);
-                bottom_blobs_unpacked[1] = offset_unpacked;
-            }
-
-            if (bottom_blobs.size() == 3)
-            {
-                const Mat& mask = bottom_blobs[2];
-                if (mask.elempack != 1)
+                for (int w_col = 0; w_col < outw; w_col++)
                 {
-                    Mat mask_unpacked;
-                    convert_packing(mask, mask_unpacked, 1, opt);
-                    bottom_blobs_unpacked[2] = mask_unpacked;
+                    int h_in = h_col * stride_h - pad_top;
+                    int w_in = w_col * stride_w - pad_left;
+                    for (int oc = 0; oc < num_output; oc++)
+                    {
+                        float sum = 0.f;
+                        if (bias_term)
+                            sum = bias_data[oc];
+                        for (int i = 0; i < kernel_h; i++)
+                        {
+                            for (int j = 0; j < kernel_w; j++)
+                            {
+                                float offset_h = 0.f;
+                                float offset_w = 0.f;
+                                float mask_ = 1.f;
+                                if (offset_not_pack)
+                                {
+                                    offset_h = offset.channel((i * kernel_w + j) * 2).row(h_col)[w_col];
+                                    offset_w = offset.channel((i * kernel_w + j) * 2 + 1).row(h_col)[w_col];
+                                }
+                                else
+                                {
+                                    const int y_c = (i * kernel_w + j) * 2;
+                                    const int x_c = (i * kernel_w + j) * 2 + 1;
+                                    offset_h = offset.channel(y_c / offset.elempack).row(h_col)[w_col * offset.elempack + y_c % offset.elempack];
+                                    offset_w = offset.channel(x_c / offset.elempack).row(h_col)[w_col * offset.elempack + x_c % offset.elempack];
+                                }
+                                if (has_mask)
+                                {
+                                    const Mat& mask = bottom_blobs[2];
+                                    if (mask_not_pack)
+                                    {
+                                        mask_ = mask.channel(i * kernel_w + j).row(h_col)[w_col];
+                                    }
+                                    else
+                                    {
+                                        const int m_c = i * kernel_w + j;
+                                        mask_ = mask.channel(m_c / mask.elempack).row(h_col)[w_col * mask.elempack + m_c % mask.elempack];
+                                    }
+                                }
+                                const float h_im = h_in + i * dilation_h + offset_h;
+                                const float w_im = w_in + j * dilation_w + offset_w;
+    
+                                // Bilinear
+                                const bool cond = h_im > -1 && w_im > -1 && h_im < h && w_im < w;
+                                int h_low = 0;
+                                int w_low = 0;
+                                int h_high = 0;
+                                int w_high = 0;
+                                float w1 = 0.f;
+                                float w2 = 0.f;
+                                float w3 = 0.f;
+                                float w4 = 0.f;
+                                bool v1_cond = false;
+                                bool v2_cond = false;
+                                bool v3_cond = false;
+                                bool v4_cond = false;
+                                if (cond)
+                                {
+                                    h_low = (int)floorf(h_im);
+                                    w_low = (int)floorf(w_im);
+                                    h_high = h_low + 1;
+                                    w_high = w_low + 1;
+    
+                                    float lh = h_im - h_low;
+                                    float lw = w_im - w_low;
+                                    float hh = 1 - lh;
+                                    float hw = 1 - lw;
+    
+                                    v1_cond = (h_low >= 0 && w_low >= 0);
+                                    v2_cond = (h_low >= 0 && w_high <= w - 1);
+                                    v3_cond = (h_high <= h - 1 && w_low >= 0);
+                                    v4_cond = (h_high <= h - 1 && w_high <= w - 1);
+    
+                                    w1 = hh * hw;
+                                    w2 = hh * lw;
+                                    w3 = lh * hw;
+                                    w4 = lh * lw;
+                                }
+    
+                                for (int ic = 0; ic < channels; ic++)
+                                {
+                                    float val = 0.f;
+                                    if (cond)
+                                    {
+                                        float v1 = v1_cond ? bottom_blob.channel(ic).row(h_low)[w_low] : 0.f;
+                                        float v2 = v2_cond ? bottom_blob.channel(ic).row(h_low)[w_high] : 0.f;
+                                        float v3 = v3_cond ? bottom_blob.channel(ic).row(h_high)[w_low] : 0.f;
+                                        float v4 = v4_cond ? bottom_blob.channel(ic).row(h_high)[w_high] : 0.f;
+                                        val = w1 * v1 + w2 * v2 + w3 * v3 + w4 * v4;
+                                    }
+                                    sum += val * mask_ * weight_ptr[((oc * channels + ic) * kernel_h + i) * kernel_w + j];
+                                }
+                            }
+                        }
+                        top_blob.channel(oc).row(h_col)[w_col] = activation_ss(sum, activation_type, activation_params);
+                    }
                 }
             }
-
-            return DeformableConv2D::forward(bottom_blobs_unpacked, top_blobs, opt);
         }
     }
 
