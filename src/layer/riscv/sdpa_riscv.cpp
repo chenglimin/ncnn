@@ -169,14 +169,15 @@ int SDPA_riscv::forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& 
 
             // memcpy(key_head.row(0), past_key_head, embed_dim * past_seqlen * sizeof(float));
             // memcpy(key_head.row(past_seqlen), cur_key_head, embed_dim * cur_seqlen * sizeof(float));
-            
+
             const float* past_ptr = past_key_head;
             float* key_ptr = key_head.row(0);
             int len = embed_dim * past_seqlen;
-            
+
 #if __riscv_vector
             int n = len;
-            while (n > 0) {
+            while (n > 0)
+            {
                 size_t vl = __riscv_vsetvl_e32m8(n);
                 vfloat32m8_t v = __riscv_vle32_v_f32m8(past_ptr, vl);
                 __riscv_vse32_v_f32m8(key_ptr, v, vl);
@@ -194,7 +195,8 @@ int SDPA_riscv::forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& 
 
 #if __riscv_vector
             n = len;
-            while (n > 0) {
+            while (n > 0)
+            {
                 size_t vl = __riscv_vsetvl_e32m8(n);
                 vfloat32m8_t v = __riscv_vle32_v_f32m8(cur_ptr, vl);
                 __riscv_vse32_v_f32m8(key_ptr, v, vl);
@@ -235,7 +237,8 @@ int SDPA_riscv::forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& 
 
 #if __riscv_vector
             int n = len;
-            while (n > 0) {
+            while (n > 0)
+            {
                 size_t vl = __riscv_vsetvl_e32m8(n);
                 vfloat32m8_t v = __riscv_vle32_v_f32m8(past_ptr, vl);
                 __riscv_vse32_v_f32m8(value_ptr, v, vl);
@@ -253,7 +256,8 @@ int SDPA_riscv::forward(const std::vector<Mat>& bottom_blobs, std::vector<Mat>& 
 
 #if __riscv_vector
             n = len;
-            while (n > 0) {
+            while (n > 0)
+            {
                 size_t vl = __riscv_vsetvl_e32m8(n);
                 vfloat32m8_t v = __riscv_vle32_v_f32m8(cur_ptr, vl);
                 __riscv_vse32_v_f32m8(value_ptr, v, vl);
